@@ -29,7 +29,9 @@ class HeadingHold(Node):
         self.declare_parameter('kp', 1.5)          # 向き誤差 -> 角速度
         self.declare_parameter('ki', 30.0)         # 曲率バイアスの学習ゲイン
         self.declare_parameter('max_w', 0.5)       # 角速度の上限 [rad/s]
-        self.declare_parameter('max_k', 0.2)       # 曲率バイアスの上限 [rad/m]
+        self.declare_parameter('max_k', 0.1)       # 曲率バイアスの上限 [rad/m]
+        self.declare_parameter('settle_time', 0.5)  # 旋回後に学習を止める時間 [s]
+        self.declare_parameter('learn_err_max', 0.15)  # これを超える誤差では学習しない [rad]
         self.declare_parameter('input_timeout', 1.0)  # 指令が途絶えたら停止 [s]
         self.declare_parameter(
             'bias_file', os.path.expanduser('~/.ros/dtw_heading_bias.json'))
@@ -38,12 +40,15 @@ class HeadingHold(Node):
         self.ki = self.get_parameter('ki').value
         self.max_w = self.get_parameter('max_w').value
         self.max_k = self.get_parameter('max_k').value
+        self.settle = self.get_parameter('settle_time').value
+        self.learn_err_max = self.get_parameter('learn_err_max').value
         self.timeout = self.get_parameter('input_timeout').value
         self.bias_file = self.get_parameter('bias_file').value
 
-        self.k = self.load_bias()      # 学習する曲率バイアス [rad/m]
+        self.k = clamp(self.load_bias(), self.max_k)  # 学習する曲率バイアス [rad/m]
         self.yaw = None
         self.target = None
+        self.straight_since = None
         self.cmd = Twist()
         self.last_cmd_time = None
         self.stopped = True
@@ -88,6 +93,7 @@ class HeadingHold(Node):
                 self.stopped = True
                 self.save_bias()
             self.target = None
+            self.straight_since = None
             return
         self.stopped = False
 
@@ -99,15 +105,23 @@ class HeadingHold(Node):
         if self.yaw is None:
             out.angular.z = w_in
         elif abs(w_in) < 1e-3 and abs(v) > 1e-3:
-            # 直進モード：向きを保持しつつバイアスを学習
-            if self.target is None:
+            # 直進モード
+            if self.straight_since is None:
+                self.straight_since = now
+            t = (now - self.straight_since).nanoseconds * 1e-9
+            if t < self.settle or self.target is None:
+                # 旋回直後：向きに追従するだけ（学習しない）
                 self.target = self.yaw
-            e = wrap(self.target - self.yaw)
-            self.k = clamp(self.k + self.ki * e * v * self.dt, self.max_k)
-            out.angular.z = clamp(self.kp * e + self.k * v, self.max_w)
+                out.angular.z = clamp(self.k * v, self.max_w)
+            else:
+                e = wrap(self.target - self.yaw)
+                if abs(e) < self.learn_err_max:
+                    self.k = clamp(self.k + self.ki * e * v * self.dt, self.max_k)
+                out.angular.z = clamp(self.kp * e + self.k * v, self.max_w)
         else:
             # 旋回中・停止中：目標をリセットし、バイアス分だけ補正
             self.target = None
+            self.straight_since = None
             out.angular.z = clamp(w_in + self.k * v, self.max_w)
 
         self.pub.publish(out)
@@ -127,7 +141,8 @@ def main():
     finally:
         node.save_bias()
         node.destroy_node()
-        rclpy.shutdown()
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':

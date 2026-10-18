@@ -1,3 +1,47 @@
+# Current working version: green ball chase (2026-10-19)
+
+The current Gazebo controller is `dtw_control ball_chase`: green color detection,
+image-based distance estimation, LiDAR obstacle avoidance, and heading correction.
+Search alternates rotation, approximately 0.5 m forward, rotation, and 1.0 m reverse
+(time-based distances; motion is gated by LiDAR clearance). After arrival, losing
+the ball continuously for 10 simulation seconds resets arrival and restarts search.
+The current controller uses color rules; the optional YOLO workflow below is separate.
+
+## Build and run in the existing ROS 2 Humble container
+
+Copy this repository's three `src` packages into `/home/ubuntu/airobot_ws/src`
+and `start_ball_chase.sh` into `/home/ubuntu/start_ball_chase.sh`.
+Then, as the container's `ubuntu` user:
+
+```bash
+source /opt/ros/humble/setup.bash
+cd /home/ubuntu/airobot_ws
+colcon build --packages-select dtw_control dtw_vision gazebo_urdf_lecture --symlink-install
+source install/setup.bash
+ros2 launch gazebo_urdf_lecture dtw_gazebo.launch.py
+```
+
+With Gazebo running, use another container terminal:
+
+```bash
+bash /home/ubuntu/start_ball_chase.sh
+# Optional: change the loss timeout (simulation seconds)
+# bash /home/ubuntu/start_ball_chase.sh -p arrived_reset_time:=10.0
+```
+
+This starts `heading_hold` and `ball_chase`; Ctrl+C stops both. Stop any existing
+`obstacle_avoid`, `obstacle_stop`, or other velocity publishers before this mode.
+`ball_chase` already handles avoidance and publishes directly to `/cmd_vel_in`.
+Use a green target of diameter 0.2 m (or set `ball_diameter` to its actual diameter).
+The red-ball and YOLO commands below describe the earlier, alternative pipeline.
+
+Python syntax and shell syntax are checked. The latest arrival-reset behavior still
+requires verification in Gazebo; this commit records the current development state.
+
+---
+
+## Earlier / optional AI tracking pipeline
+
 # dtw_vision : AI ball tracking + LiDAR obstacle avoidance
 
 ```
