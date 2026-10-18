@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+build/
+install/
+log/
+*.bak
+# large / generated
+*.pt
+runs/
+ball_dataset/
+metrics.csv
+*.mp4
+*.mov
